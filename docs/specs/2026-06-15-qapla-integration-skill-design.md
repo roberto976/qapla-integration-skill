@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-15
 - **Status:** Approved (brainstorming)
-- **Repo:** https://github.com/roberto976/qapla-intergration-skill (public, MIT)
+- **Repo:** https://github.com/roberto976/qapla-integration-skill (public, MIT)
 
 ## Purpose
 
@@ -48,7 +48,7 @@ DB table names, Bifrost, internal pipelines).
 ## Repository structure
 
 ```
-qapla-intergration-skill/
+qapla-integration-skill/
 |-- README.md                      # purpose, scope, install (cross-agent)
 |-- LICENSE                        # MIT
 |-- docs/specs/                    # this design doc

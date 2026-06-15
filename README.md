@@ -73,11 +73,11 @@ copying (or symlinking) that directory into your agent's skills folder.
 ### Claude Code
 
 ```bash
-git clone https://github.com/roberto976/qapla-intergration-skill.git
+git clone https://github.com/roberto976/qapla-integration-skill.git
 # Personal (all projects):
-cp -r qapla-intergration-skill/skill/qapla-integration ~/.claude/skills/
+cp -r qapla-integration-skill/skill/qapla-integration ~/.claude/skills/
 # — or project-scoped:
-cp -r qapla-intergration-skill/skill/qapla-integration .claude/skills/
+cp -r qapla-integration-skill/skill/qapla-integration .claude/skills/
 ```
 
 Then in Claude Code the skill activates automatically when you mention Qapla', or invoke it
@@ -86,13 +86,13 @@ explicitly.
 ### Codex
 
 ```bash
-cp -r qapla-intergration-skill/skill/qapla-integration ~/.codex/skills/
+cp -r qapla-integration-skill/skill/qapla-integration ~/.codex/skills/
 ```
 
 ### Gemini CLI
 
 ```bash
-cp -r qapla-intergration-skill/skill/qapla-integration ~/.gemini/skills/
+cp -r qapla-integration-skill/skill/qapla-integration ~/.gemini/skills/
 ```
 
 ### Any Agent Skills-compatible tool
