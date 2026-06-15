@@ -12,93 +12,74 @@ Every tracking event in Qapla' carries **two status representations simultaneous
 
 | Layer | Field | Description |
 |---|---|---|
-| **Raw courier status** | `courierStatus` | Exact text or code as reported by the carrier — varies by courier, locale, and integration. |
-| **Canonical Qapla' status** | `qaplaStatus` object | Normalized, carrier-agnostic status with a numeric `id`, label, color, and icon. |
+| **Raw courier status** | `courierStatus` | Exact text or code as reported by the carrier — varies by courier, locale, and API version. |
+| **Canonical Qapla' status** | `qaplaStatus` object | Normalized, carrier-agnostic status with a stable numeric `id`, human-readable label, color, and optional sub-state detail. |
 
-**Key rule for developers:** always branch your logic on the canonical `qaplaStatus.id` (or `qaplaStatusID` in webhook payloads), never on raw `courierStatus` strings. Raw courier strings are unstable across carriers and carrier API versions. The canonical status is the stable, versioned contract.
+**Key rule for developers:** always branch your logic on the canonical `qaplaStatus.id` (or `qaplaStatusID` in webhook payloads), never on raw `courierStatus` strings. Raw courier strings are unstable across carriers and carrier API versions. The canonical `id` is the stable, versioned contract.
 
 ---
 
-## The `qaplaStatus` Object
+## Canonical Status ID Table
 
-Wherever the API returns status information — `getShipment`, `getCompanyShipments`, `trackingByTimeFrame`, history arrays — the canonical status appears as a nested `qaplaStatus` object:
+The following table is the authoritative list of Qapla' status IDs. These IDs are permanent and stable across all API versions.
+
+| id | code | Label (IT) | Color | Has sub-states | Notes |
+|----|------|-----------|-------|----------------|-------|
+| 0 | — | Da tracciare | `#ecf0f1` | no | Shipment queued; carrier has not yet provided a tracking event. |
+| 10 | `PICKUP` | Fermo deposito | `#FFDE00` | no | Parcel available for collection at a pickup point. |
+| 20 | `PROCESSED` | Preso in carico | `#35495e` | no | Carrier has collected the parcel. |
+| 30 | `IN_TRANSIT` | In transito | `#1D76D8` | no | Parcel is moving through the carrier network. |
+| 40 | `DELAY` | Ritardo | `#e9be57` | no | Delivery is delayed beyond the estimated date. |
+| 50 | `OUT_FOR_DELIVERY` | In consegna | `#376600` | yes | Last-mile delivery in progress. See sub-states below. |
+| 60 | `FAILED_ATTEMPT` | Tentativo fallito | `#FF6E00` | no | Carrier attempted delivery; recipient was unavailable. |
+| 70 | `EXCEPTION` | Anomalia | `#970D00` | yes | Carrier exception (lost, damaged, customs hold, etc.). See sub-states. |
+| 90 | `DEPARTED` | Partita | `#8A2BE2` | no | Legacy: parcel dispatched/departed hub (used by older integrations). |
+| 95 | `RETURNED` | Rientrata | `#620000` | no | Parcel is being returned to sender. |
+| 99 | `DELIVERED` | Consegnata | `#66cc00` | no | Confirmed delivery to recipient. Primary trigger for review-request flows. |
+
+> Retrieve the live list at any time via `GET /1.3/getQaplaStatus/?apiKey=YOUR_KEY&lang=en`. Pin these IDs at integration time; do not hard-code label strings — they are translated.
+
+### Known Sub-states
+
+For statuses with **Has sub-states = yes**, an optional `detailID` qualifies the status further:
+
+| Parent id | detailID | code | Meaning |
+|-----------|----------|------|---------|
+| 50 | 1 | `CUSTOMS` | Parcel held in customs. |
+| 50 | 3 | — | Out for delivery with delay. |
+| 70 | 1 | `STOCK` | Parcel held in carrier depot (giacenza). |
+| 70 | 2 | `RETURN` | Parcel being returned to sender. |
+| 70 | 3 | `DAMAGED` | Parcel damaged. |
+| 70 | 4 | `LOST` | Parcel lost. |
+| 70 | 5 | `PARTIAL_DELIVERY` | Partial delivery (multi-collo shipment). |
+
+---
+
+## The `qaplaStatus` Object in API Responses
+
+Wherever the API returns status information — `getShipment`, `getCompanyShipments`, `trackingByTimeFrame` — the canonical status appears as a nested `qaplaStatus` object:
 
 ```json
 {
   "qaplaStatus": {
-    "id": 3,
+    "id": 30,
     "status": "IN TRANSIT",
     "detailID": 0,
     "detail": null,
     "color": "#1D76D8",
-    "icon": "https://cdn.qapla.it/status/3.svg"
+    "icon": "https://cdn.qapla.it/status/30.svg"
   }
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | integer | Stable numeric ID — use this for branching. |
+| `id` | integer | Stable numeric ID — use this for branching logic. |
 | `status` | string | Human-readable label in the language selected via `lang`. |
-| `detailID` | integer | Optional sub-classification (0 = none). |
-| `detail` | string\|null | Optional detail text (e.g. `"GIACENZA"` for storage hold). |
+| `detailID` | integer | Sub-classification ID (0 = none). |
+| `detail` | string\|null | Sub-state label text, or `null` when `detailID` is 0. |
 | `color` | string | Hex color for UI display. |
-| `icon` | string | URL to SVG icon (`https://cdn.qapla.it/status/{id}.svg`). |
-
----
-
-## Canonical Status Lifecycle
-
-The table below shows the main lifecycle states. **IDs listed here are confirmed from the live API documentation**; always cross-check against the live status list (call `GET /getQaplaStatus/` with your API key) as Qapla' may add sub-states over time.
-
-| Canonical State | Confirmed ID(s) | Typical `color` | Meaning |
-|---|---|---|---|
-| Order received / pending | ~0–1 | grey | Order known to Qapla', shipment not yet booked or tracking not yet active. Confirm exact IDs via `/getQaplaStatus/`. |
-| Shipment created / info received | ~2 | grey/blue | Label created; carrier has not scanned the parcel yet. |
-| In transit | **3** | `#1D76D8` (blue) | Parcel moving through the carrier network. |
-| Departed (hub/sort) | **20** | `#8A2BE2` (purple) | Parcel departed from a logistics hub. |
-| Out for delivery | **4** | orange | Last-mile delivery attempt in progress. |
-| Delivered | **99** | `#66CC00` (green) | Confirmed delivery to recipient. |
-| Exception / failed delivery | ~6 | red | Delivery attempt failed, address issue, or carrier exception. Confirm ID via `/getQaplaStatus/`. |
-| In storage / giacenza | sub-state of exception | red/amber | Parcel held at carrier depot (appears as `detail: "GIACENZA"` in `statusDetails`). |
-| Returned to sender | ~95 | dark red | Carrier is returning the parcel. Confirm ID via `/getQaplaStatus/`. |
-
-> **Note:** IDs 3, 4, 20, and 99 are confirmed from the API. IDs for pending, exception, returned, and storage states are approximate — verify them by calling `GET /1.2/getQaplaStatus/` or `GET /1.3/getQaplaStatus/` with a valid API key.
-
-### `statusDetails` sub-states
-
-Some canonical statuses carry an optional `statusDetails` array with additional granularity:
-
-```json
-"statusDetails": [
-  { "id": 12, "detail": "GIACENZA" }
-]
-```
-
-Use `statusDetails[].detail` to differentiate sub-cases (e.g. storage hold vs. generic exception) without parsing free-text courier strings.
-
----
-
-## Multilingual Status Messages
-
-Qapla' provides human-readable status labels in three languages, selected via the `lang` query parameter:
-
-| Value | Language |
-|---|---|
-| `it` | Italian (default when omitted) |
-| `en` | English |
-| `es` | Spanish |
-
-The `lang` parameter is supported on:
-
-- `GET /1.2/getShipment/` — single shipment lookup
-- `GET /1.2/getCompanyShipments/` (v1.3 cross-channel variant)
-- `GET /1.2/trackingByTimeFrame/` — bulk status-change polling
-- `GET /1.3/getCompanyShipment/` and `GET /1.3/getCompanyShipments/`
-
-When `lang=en` is set, the `qaplaStatus.status` field returns English text (e.g. `"IN TRANSIT"` instead of `"IN TRANSITO"`). The numeric `id` and `color` are language-independent and always stable.
-
-**Use case:** pass `lang` matching the end-customer's locale when rendering a tracking page or composing a notification; store the numeric `id` in your database for logic, not the translated label.
+| `icon` | string | URL to the status icon (`https://cdn.qapla.it/status/{id}.svg`). |
 
 ---
 
@@ -108,48 +89,80 @@ When Qapla' fires a webhook on a status change, the payload includes both layers
 
 ```json
 {
+  "orderReference": "RIF-12345",
+  "trackingNumber": "BRT1234567890",
+  "courierCode": "BRT",
   "courierStatus": "CONSEGNATO",
-  "qaplaStatusID": "99",
-  "qaplaStatus": "DELIVERED",
-  "place": "MILANO MI",
-  "date": "2026-06-15 10:42:00",
-  "statusDetails": []
+  "statusID": 99,
+  "status": "DELIVERED",
+  "statusDate": "2026-06-15 10:42:00",
+  "trackingPageUrl": "https://mtk.qapla.it/<hash>",
+  "history": []
 }
 ```
 
 | Webhook Field | Type | Description |
 |---|---|---|
 | `courierStatus` | string | Raw status text from the carrier — do not branch on this. |
-| `qaplaStatusID` | string | Numeric canonical status ID as a string — cast to int for comparison. |
-| `qaplaStatus` | string | Human-readable canonical label (language depends on workspace settings). |
-| `place` | string | Location reported by the carrier, if available. |
-| `date` | string | Status timestamp as reported by the carrier (`YYYY-MM-DD HH:MM:SS`). |
-| `statusDetails` | array | Optional sub-state objects with `id` and `detail`. |
+| `statusID` | integer | **Canonical status ID** — use this for branching. Maps directly to the `id` column in the table above. |
+| `status` | string | Human-readable canonical label (language follows workspace settings). |
+| `statusDate` | string | Timestamp of the status event (`YYYY-MM-DD HH:MM:SS`). |
 
-> **Important:** `qaplaStatusID` arrives as a **string** in webhook payloads (e.g. `"99"`). Cast it to an integer before comparing to the numeric IDs in the table above.
+> **Important:** branch exclusively on `statusID` (integer). Do not parse or compare `status` label strings, which are locale-dependent and may change.
 
----
-
-## Status Fields in API Responses
-
-For `trackingByTimeFrame` and `getCompanyShipments`, each shipment object in the `shipments[]` array contains the `qaplaStatus` nested object (see structure above). When `data=history` is requested on `getCompanyShipments`, the `trackingHistory[]` array contains one entry per event, each with its own `qaplaStatus` object and `courierStatus` string.
-
-### Polling pattern: `trackingByTimeFrame`
-
-```
-GET /1.2/trackingByTimeFrame/?apiKey=…&dateFrom=2026-06-15T08:00:00&dateTo=2026-06-15T09:00:00&lang=en
-```
-
-Returns all shipments whose status changed within the window. Suitable for near-real-time polling. Rate limit: 120-token bucket, refill 2 tokens/second; batch calls consuming 100 tokens count as 100 requests.
+Webhook delivery is configurable per workspace: a workspace can subscribe only to specific `statusID` values (e.g. only `50` and `99`) via the control panel. Webhooks not matching the configured filter are not delivered.
 
 ---
 
-## Confirming the Full Status List
+## Multilingual Status Labels
 
-To retrieve the authoritative, up-to-date list of all canonical status IDs and their metadata for your integration:
+Qapla' returns human-readable status labels in three languages, controlled by the `lang` query parameter:
+
+| Value | Language |
+|---|---|
+| `it` | Italian (default when omitted) |
+| `en` | English |
+| `es` | Spanish |
+
+The `lang` parameter is accepted on:
+
+- `GET /1.2/trackingByTimeFrame/`
+- `GET /1.3/getShipment/`
+- `GET /1.3/getCompanyShipments/`
+- `GET /1.3/getQaplaStatus/`
+
+The numeric `id` and `color` are language-independent and never change. Only the `status` label string is affected by `lang`.
+
+**Use case:** pass `lang` matching the end-customer's locale when rendering a tracking page or composing a notification. Store the numeric `id` in your database for business logic — never the translated label.
+
+---
+
+## Recommended Integration Patterns
+
+### Polling (`trackingByTimeFrame`)
 
 ```
-GET https://api.qapla.dev/1.2/getQaplaStatus/?apiKey=YOUR_API_KEY&lang=en
+GET https://api.qapla.it/1.3/trackingByTimeFrame/?apiKey=…&dateFrom=2026-06-15T08:00:00&dateTo=2026-06-15T09:00:00&lang=en
 ```
 
-This returns all active `qaplaStatus` objects. Run this at integration time (and pin the results) rather than hard-coding IDs from documentation alone.
+Returns all shipments whose status changed within the window (filtered on `dataStatus`). Suitable for near-real-time polling. Rate limit: 120-token bucket, refill 2 tokens/second.
+
+### Branching on canonical ID
+
+```js
+// Always compare against the integer id, not the label string.
+switch (shipment.qaplaStatus.id) {
+  case 99: markDelivered(shipment); break;
+  case 95: flagReturned(shipment); break;
+  case 60: scheduleRetry(shipment); break;
+  case 70: raiseException(shipment, shipment.qaplaStatus.detailID); break;
+}
+```
+
+### Confirming the full status list
+
+```
+GET https://api.qapla.it/1.3/getQaplaStatus/?apiKey=YOUR_KEY&lang=en
+```
+
+Run this at integration time to obtain all active status objects with their current metadata. Pin the `id` values; do not pin label strings.

@@ -4,242 +4,437 @@ synced: 2026-06-15
 api_versions: [1.2, 1.3]
 ---
 
-# Qapla' API — Couriers Reference
+# Qapla' Courier API Reference
 
-Base URL for all requests: `https://api.qapla.it/{version}/{endpoint}/`
-Authentication: pass your channel's **API Key** in every request body (field `apiKey`).
-Rate limit: token-bucket, capacity 120, refill 2 req/s. Exceeding returns HTTP 429.
-
-This file covers three courier-facing utilities:
-
-| Endpoint | Version | Method |
-|---|---|---|
-| `getQuotes` | 1.3 | POST |
-| `getPudos` | 1.3 | POST |
-| `detectCourier` | 1.3 | GET |
+API host: `api.qapla.it`  
+All endpoints require a per-channel **API Key** obtained from the Qapla' Customer Care.
 
 ---
 
 ## 1. getQuotes
 
-**Purpose:** Request real-time shipping price quotes from multiple couriers simultaneously for a given shipment, before committing to a label.
+### Purpose
 
-**Method + path:** `POST /1.3/getQuotes/`
+Request real-time shipping quotes from one or more couriers simultaneously. Requires the `courier-quotes` (plan 2021) or `quote` (plan 2025) product enabled on the channel — contact Customer Care to activate.
 
-### Required fields
+### Method & Path
 
-| Field | Type | Notes |
-|---|---|---|
-| `apiKey` | string | Channel API key |
-| `getQuotes.reference` | string | Unique identifier for this quote request. Alphanumeric plus `-`, `_`, `.`; 3–255 characters. Must be unique per call — reuse may cause deduplication surprises. |
-| `getQuotes.recipient.zipCode` | string | Mandatory for all EU destinations. |
-| `getQuotes.recipient.province` | string | Mandatory for Italian (`IT`) destinations. |
-| `getQuotes.recipient.country` | string | ISO 3166-1 alpha-2 (e.g. `IT`, `DE`, `FR`). |
-| `getQuotes.parcels` | array | At least one parcel object required. |
-| `getQuotes.parcels[].weight` | float | Weight in kg. Required per parcel. |
-| `getQuotes.parcels[].width` | float | Width in cm. Required per parcel. |
-| `getQuotes.parcels[].height` | float | Height in cm. Required per parcel. |
-| `getQuotes.parcels[].length` | float | Length in cm. Required per parcel. |
-| `getQuotes.amountShipment` | float | Declared shipment value. Mandatory. |
+```
+POST https://api.qapla.it/1.3/getQuotes/
+```
 
-### Optional fields
+### Authentication
+
+Pass the API Key via header `X-API-KEY` **or** query string `?apiKey=<key>`.  
+Optional: `X-Sandbox: true` header to activate sandbox mode (note: GLS-ITA has no sandbox and always hits production).
+
+### Required Fields
 
 | Field | Type | Notes |
-|---|---|---|
-| `getQuotes.recipient.address` | string | Street address; improves zone matching. |
-| `getQuotes.recipient.city` | string | City name. |
-| `getQuotes.amountCash` | float | Cash-on-delivery (COD) amount. Triggers COD service quotes. |
-| `getQuotes.amountInsurance` | float | Insured value, if requesting insurance add-on quotes. |
-| `getQuotes.currency` | string | ISO 4217 currency code. Defaults to `EUR`. |
-| `getQuotes.couriers` | array of strings | Restrict results to a specific subset of courier codes (e.g. `["GLS-ITA", "DHL"]`). Omit to get all available quotes. |
+|-------|------|-------|
+| `reference` | string | Merchant's unique order reference. Chars: `[a-zA-Z0-9_\-.]`, length 3–255. Echo'd in response. |
+| `recipient` | object | Destination address. |
+| `recipient.city` | string | City name (English for international). |
+| `recipient.country` | string | ISO 3166-1 alpha-2 (e.g. `"IT"`, `"DE"`). |
+| `recipient.zipCode` | string | Required for European shipments. |
+| `recipient.province` | string | 2-char province code. Required for Italy. |
+| `recipient.street` | string | Street and civic number. Recommended. |
+| `parcels` | array | At least one parcel object. |
+| `parcels[].weight` | float | Weight in kg. Rounded up per-courier if needed. |
+| `parcels[].width` | float | Width in cm. |
+| `parcels[].height` | float | Height in cm. |
+| `parcels[].length` | float | Length in cm. |
+| `amountShipment` | float | Merchandise value in `currency`. Format: `#.##`. |
 
-### Compact request example
+### Optional Fields
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `currency` | string | ISO 4217 (e.g. `"EUR"`, `"GBP"`). Default: `"EUR"`. No conversion performed. **GLS-ITA and LICCARDI return an error for non-EUR.** |
+| `amountCash` | float | Cash-on-delivery value. `0` or absent = no COD. |
+| `amountInsurance` | float | Insured value. `0` or absent = no insurance. |
+| `couriers` | array | Courier codes to query (e.g. `["DHL","UPS"]`). If omitted or empty, all enabled couriers on the channel are queried. |
+| `senderCode` | string | Qapla' sender code. GLS-ITA does not support this field. |
+
+### Compact Request Example
 
 ```json
-POST /1.3/getQuotes/
+POST https://api.qapla.it/1.3/getQuotes/
+X-API-KEY: <your-api-key>
+
 {
-  "apiKey": "YOUR_API_KEY",
-  "getQuotes": {
-    "reference": "QUOTE-2026-001",
-    "recipient": {
-      "country": "IT",
-      "zipCode": "20121",
-      "province": "MI"
-    },
-    "parcels": [
-      { "weight": 1.5, "width": 20, "height": 15, "length": 30 }
-    ],
-    "amountShipment": 49.90,
-    "amountCash": 0,
-    "currency": "EUR"
-  }
+  "reference": "ORD-20240620-001",
+  "recipient": {
+    "street": "Via Roma 1",
+    "city": "Milano",
+    "province": "MI",
+    "zipCode": "20100",
+    "country": "IT"
+  },
+  "parcels": [{ "weight": 2.5, "width": 20.0, "height": 15.0, "length": 30.0 }],
+  "amountShipment": 150.00,
+  "currency": "EUR",
+  "couriers": ["DHL", "UPS"]
 }
 ```
 
-### Compact response example
+### Response Envelope
 
 ```json
 {
-  "response": {
-    "getQuotes": [
+  "getQuotes": {
+    "result": "OK",
+    "version": "1.3.2",
+    "reference": "ORD-20240620-001",
+    "quotationId": "566ef67f-ec5f-4517-ac32-543c69032f5d",
+    "startTimestamp": "2024-06-20T13:15:02.408+00:00",
+    "endTimestamp": "2024-06-20T13:15:06.208+00:00",
+    "couriers": [
       {
-        "courierCode": "GLS-ITA",
-        "courierName": "GLS Italy",
-        "serviceCode": "COURIER",
-        "serviceName": "GLS Courier",
-        "price": 5.80,
-        "currency": "EUR",
-        "deliveryDays": 1
+        "code": "DHL",
+        "quotes": [
+          {
+            "service": {
+              "courierCode": "I",
+              "qaplaCode": 4,
+              "description": "Domestic Express H 9"
+            },
+            "currency": "EUR",
+            "amount": 57.68,
+            "expectedPickupDate": null,
+            "expectedDeliveryDate": "2024-06-24T09:00:00",
+            "messages": [],
+            "deliveryOptions": null
+          }
+        ],
+        "messages": []
       },
       {
-        "courierCode": "DHL",
-        "courierName": "DHL Express",
-        "serviceCode": "EXPRESS",
-        "serviceName": "DHL Express",
-        "price": 12.40,
-        "currency": "EUR",
-        "deliveryDays": 1
+        "code": "UPS",
+        "quotes": [
+          {
+            "service": { "courierCode": "11", "qaplaCode": 3, "description": "Standard" },
+            "currency": "EUR",
+            "amount": 55.25,
+            "expectedPickupDate": null,
+            "expectedDeliveryDate": null,
+            "messages": [
+              {
+                "type": "message",
+                "code": 110920,
+                "content": "Ship To Address Classification is changed from Commercial to Residential"
+              }
+            ],
+            "deliveryOptions": null
+          }
+        ],
+        "messages": []
       }
     ]
   }
 }
 ```
 
+### Key Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `result` | string | `"OK"` if at least one courier succeeded; `"KO"` for global errors. |
+| `couriers[].code` | string | Qapla' courier code (e.g. `"DHL"`, `"UPS"`). |
+| `couriers[].quotes[].service.description` | string | Human-readable service name (e.g. `"Standard"`, `"Express"`). |
+| `couriers[].quotes[].amount` | float | Quote price in `currency`. |
+| `couriers[].quotes[].currency` | string | Actual quote currency (may differ from requested). |
+| `couriers[].quotes[].expectedDeliveryDate` | string\|null | `yyyy-MM-dd` or RFC 3339; `null` if unavailable. |
+
 ### Gotchas
 
-- **Every call is metered.** Each `getQuotes` invocation consumes API credits and counts against the rate limit. Avoid polling or speculative calls in bulk loops.
-- **`reference` must be unique per request.** It is not an order reference — it is a quote-session identifier. Re-using a reference within a short window may return cached or deduplicated results.
-- **`zipCode` is mandatory for EU**, `province` is additionally required for Italy. Missing either will cause courier-specific validation errors.
-- **All four parcel dimension fields are required** (weight, width, height, length). Omitting any one causes the parcel to be rejected.
-- **`amountShipment` is always required**, even when zero. Pass `0` explicitly rather than omitting the field.
-- **GLS-ITA and LICCARDI reject non-EUR currency.** If you pass a non-EUR `currency`, those couriers will be absent from the response without an explicit error.
-- **GLS-ITA ignores `senderCode`.** Do not rely on sender-code overrides for GLS-ITA in quote requests; they are silently disregarded.
-- **Restricting via `couriers` array** limits which couriers compute a quote — useful when you already know the desired carrier and want to avoid billing for unused quotes.
+- Couriers are queried **in parallel** — response latency is determined by the slowest courier, not the sum. Use `couriers` to limit scope.
+- `result: "OK"` at the top level only means at least one courier succeeded. Individual courier errors appear as `quotes: []` with `messages[].type: "error"`.
+- **GLS-ITA and LICCARDI** return an error for any `currency` other than `"EUR"`.
+- Rate limit: token bucket per channel — 120 tokens max, refill 2 tokens/second. HTTP 429 on breach.
+- Product must be explicitly activated. Without activation the response is `KO`.
+
+### Supported Couriers (quotes)
+
+| Code | VAT in quote |
+|------|-------------|
+| `DHL` | included |
+| `FEDEX` | included |
+| `GLS-ITA` | included |
+| `UPS` | included |
+| `LICCARDI` | excluded |
+| `TNT-ITA` | excluded |
+| `AMAZON-SHIPPING` | excluded |
 
 ---
 
 ## 2. getPudos
 
-**Purpose:** Search for pickup/drop-off points (PUDO — Pick Up / Drop Off) supported by a given courier near a recipient address. Used before label creation when the shipment will be delivered to a collection point rather than a home address.
+### Purpose
 
-**Method + path:** `POST /1.3/getPudos/`
+Search for PUDO (Pick-Up / Drop-Off) points near an address or GPS coordinates. Typically called during checkout so the buyer can choose where to collect the parcel. This is a **billable product** requiring activation by Customer Care.
 
-### Required fields
+### Method & Path
 
-| Field | Type | Notes |
-|---|---|---|
-| `apiKey` | string | Channel API key. |
-| `getPudos.courier` | string | Courier code (e.g. `GLS-ITA`, `DHL`, `TNT`). Not all couriers support PUDO — validate against your account's `getCouriers` response. |
-| `getPudos.country` | string | ISO 3166-1 alpha-2. |
-| `getPudos.zipCode` | string | Postal code of the search area. Required unless `city` alone is accepted by the courier. |
+```
+POST https://api.qapla.it/1.2/getPudos/
+```
 
-### Optional fields
+> The path is **always `/1.2/getPudos/`** regardless of what API version you use for other endpoints. No `/1.3/` alias exists.
 
-| Field | Type | Notes |
-|---|---|---|
-| `getPudos.address` | string | Street address to narrow proximity search. |
-| `getPudos.city` | string | City name. |
-| `getPudos.type` | string | Filter by point type. Accepted values vary by courier (e.g. `LOCKER`, `POINT`). Omit to return all types. |
+E-commerce plugin variant (for native integrations):
+```
+POST https://api.qapla.it/1.2/getPudos/{plugin}
+```
+Valid plugin slugs: `bigcommerce`, `commercelayer`, `ecwid`, `magento`, `magento2`, `prestashop`, `shopify`, `shopware6`, `storeden`, `vtex`, `woocommerce`, `edock`, `maxpho`.
 
-### Compact request example
+### Authentication
+
+Pass the API Key as `apiKey` in the **JSON body** or as a query string parameter `?apiKey=<key>`.
+
+### Request Body (flat JSON object)
+
+The body is a **flat JSON object** — fields are at the top level, not nested in a sub-object.
+
+| Field | Type | Required | Notes |
+|-------|------|:--------:|-------|
+| `apiKey` | string | Yes | Channel API Key. Alternatively via query string. |
+| `postCode` | string | Yes* | Postal code of the search location. Min 3 chars. *Required unless using coordinates. |
+| `country` | string | Yes | ISO 3166-1 alpha-2 (e.g. `"IT"`, `"ES"`). Exactly 2 chars. |
+| `couriers` | array | No | Qapla' courier codes to query (e.g. `["GLS-ITA","DHL"]`). If **omitted or empty**, all PUDO couriers configured on the channel are queried. |
+| `street` | string | No | Street and civic number. Refines geolocation. |
+| `city` | string | No | City/municipality. **Required for TIPSA.** |
+| `province` | string | No | Province code. |
+| `radius` | number | No | Search radius in km. `<= 0` means no limit. Only honoured by couriers that accept it. |
+| `limit` | number | No | Max PUDO points per courier. `<= 0` means no limit. |
+| `unifiedResults` | bool | No | If `true`, returns a flat list of all PUDOs sorted by distance, each with an added `courier` field. Default: `false`. |
+| `lat` | float | No* | Latitude. Alternative to `postCode` (requires `lng` and `country`). |
+| `lng` | float | No* | Longitude. Alternative to `postCode` (requires `lat` and `country`). |
+
+### Compact Request Example
 
 ```json
-POST /1.3/getPudos/
+POST https://api.qapla.it/1.2/getPudos/
+Content-Type: application/json
+
 {
-  "apiKey": "YOUR_API_KEY",
-  "getPudos": {
-    "courier": "GLS-ITA",
-    "country": "IT",
-    "zipCode": "20121",
-    "city": "Milano"
-  }
+  "apiKey": "[API_KEY]",
+  "postCode": "20121",
+  "country": "IT",
+  "city": "Milano",
+  "street": "Via Brera 12",
+  "couriers": ["GLS-ITA", "DHL"],
+  "radius": 5,
+  "limit": 3
 }
 ```
 
-### Compact response example
+### Response Envelope
 
 ```json
 {
-  "response": {
-    "getPudos": [
+  "getPudos": {
+    "result": "OK",
+    "error": "",
+    "data": [
       {
-        "id": "123456",
-        "name": "Tabaccheria Rossi",
-        "address": "Via Roma 10",
-        "city": "Milano",
-        "zipCode": "20121",
-        "country": "IT",
-        "type": "POINT",
-        "SHOP_ID": "GLS_SHOP_123456",
-        "PARTNER_SHOP_ID": "P123456"
+        "courier": "GLS-ITA",
+        "statusCode": 200,
+        "error": "",
+        "servicePointList": [
+          {
+            "ID": "42831",
+            "partnerID": "GLS000123",
+            "name": "Tabaccheria Centrale",
+            "type": "SHOPINSHOP",
+            "street": "Via Brera 12",
+            "postCode": "20121",
+            "city": "Milano",
+            "province": "MI",
+            "country": "IT",
+            "coordinates": { "latitude": 45.4654, "longitude": 9.1859 },
+            "distance": 0.3,
+            "telephone": "0226001234",
+            "notes": null,
+            "businessDays": [
+              {
+                "day": 1,
+                "dayName": "Monday",
+                "dayNameIT": "lunedì",
+                "businessHours": [
+                  { "open": "08:00", "close": "13:00" },
+                  { "open": "15:30", "close": "19:30" }
+                ]
+              }
+            ],
+            "availableServices": [
+              { "serviceDescription": "parcel:pick-up" },
+              { "serviceDescription": "parcel:drop-off" }
+            ],
+            "courierSpecific": [],
+            "holidays": [],
+            "pushOrderPUDO": {
+              "id": "42831",
+              "courierID": "GLS-ITA",
+              "type": "GLS000123",
+              "name": "Tabaccheria Centrale",
+              "address": "Via Brera 12",
+              "city": "Milano",
+              "state": "MI",
+              "country": "IT",
+              "postalCode": "20121",
+              "description": null,
+              "psfKey": null,
+              "keyword": null,
+              "postnumber": null,
+              "harmonisedId": null
+            }
+          }
+        ]
       }
     ]
   }
 }
 ```
 
+### Per-Courier `statusCode` Values
+
+| Code | Meaning |
+|------|---------|
+| `200` | OK — search completed successfully |
+| `404` | NOT FOUND — no PUDOs in the area |
+| `408` | TIMEOUT — courier webservice did not respond in time |
+| `500` | GENERIC ERROR |
+| `501` | EMPTY RESPONSE |
+| `522` | UNPROCESSABLE RESPONSE — invalid JSON/XML from courier |
+| `599` | CUSTOM ERROR — courier-specific; see per-entry `error` field |
+
+### ServicePoint Object Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ID` | string | Point identifier in the courier's network. |
+| `partnerID` | string\|null | Optional secondary identifier (not all couriers provide this). |
+| `name` | string | Name of the shop, locker, or post office. |
+| `type` | string | `SHOP`, `LOCKER`, `POSTOFFICE`, `SHOPINSHOP`, or `UNKNOWN`. |
+| `street`, `postCode`, `city`, `province`, `country` | string | Address fields. |
+| `coordinates` | object | `{"latitude": float, "longitude": float}`. |
+| `distance` | float | Distance in km from the search location. |
+| `businessDays` | array | Opening hours per weekday (ISO day 1=Monday–7=Sunday). |
+| `availableServices` | array | `[{"serviceCode": string, "serviceDescription": string}]`. |
+| `courierSpecific` | array | Courier-specific fields as `[{"name": string, "value": string}]`. E.g. `harmonisedId`, `psfKey`, `keyword` for DHLPARCEL-ES. |
+| `holidays` | array | `[{"startDate": "yyyy-mm-dd", "endDate": "yyyy-mm-dd"}]`. |
+| `pushOrderPUDO` | object | PUDO payload ready to pass directly to `pushOrder`/`createLabel` (see below). |
+
+### `pushOrderPUDO` — Required Fields per Courier
+
+Use the `pushOrderPUDO` object from each `ServicePoint` as the `PUDO` node in your `pushOrder` or `createLabel` call. Required fields vary by courier:
+
+| Courier(s) | Required fields in `pushOrderPUDO` |
+|------------|-------------------------------------|
+| DHL, BRT, FEDEX, INPOST-GROUP, SENDING, MONDIALRELAY | `id` |
+| GLS-ITA, TNT-ITA | `id`, `type` |
+| PTI | `id`, `type`, `name` |
+| DHL-PAKET | `id`, `type`, `name`, `city`, `country`, `postalCode` |
+| SDA, UPS | `id`, `type`, `name`, `address`, `city`, `country`, `postalCode`, `state` |
+| DHLPARCEL-ES | `id`, `harmonisedId`, `address`, `city`, `country`, `postalCode`, `psfKey`, `keyword`, `postnumber` |
+
+> **PTI note**: PTI uses string type values (`ConsegnaLocker`, `ConsegnaPuntoPoste`, `ConsegnaUfficioPostale`, `ConsegnaPUDOUPS`) — not numeric.
+
+### Supported Couriers (PUDO search)
+
+`UPS`, `BRT`, `GLS`, `GLS-ITA`, `GLS-SPAIN`, `GLS-AT`, `DHL`, `PTI`, `INPOST-GROUP`, `INPOST-GROUP-V3`, `FEDEX`, `DHLPARCEL-ES`, `CORREOS`, `SEUR`, `TIPSA`, `MRW-ES`, `NACEX-ES`, `CORREOS-EXPRESS`, `SENDING`, `DHL-PAKET`, `SPRING-GDS`, `TNT-ITA`, `MONDIALRELAY`
+
+> `INPOST` and `INPOST_PL` are deprecated — use `INPOST-GROUP` or `INPOST-GROUP-V3`.
+
 ### Gotchas
 
-- **Not all couriers support PUDO.** Calling `getPudos` for an unsupported courier returns an error or empty list. Check the courier's capabilities via `getCouriers` first.
-- **Per-courier field names differ significantly.** The identifiers returned in the PUDO objects must be passed verbatim into the subsequent `pushOrder` or `createLabel` PUDO sub-object. Field mapping by courier:
-  - **GLS-ITA:** use `SHOP_ID` and `PARTNER_SHOP_ID`
-  - **DHL:** use `harmonisedId`, `keyword`, `psfKey`
-  - **TNT:** use `id` and `type` (numeric: `3` = point, `5` = locker)
-  - **Poste Italiane (PTI):** `type` must be the exact string `ConsegnaPuntoPoste`
-- **Do not transform or cache PUDO ids.** Pass them back exactly as received; couriers validate the raw values server-side.
-- **This call is metered.** Each `getPudos` request consumes API credits and rate-limit tokens.
-- **`type` filter semantics are courier-specific.** Passing an unsupported type string may silently return zero results rather than an error. Test per courier.
+- The `couriers` filter is **optional and plural (array)**. If omitted, all PUDO couriers configured on the channel are queried automatically.
+- There is **no request `type` filter** — type filtering is done client-side on the response.
+- Use `street` (not `address`) in the request body for address refinement.
+- Response envelope wraps everything in `{"getPudos": {...}}`.
+- `result: "OK"` at the top level means at least one courier responded with HTTP 200. Check each courier's `statusCode` for per-courier status.
+- Passing a courier not configured on the channel returns `result: KO`.
+- Rate limit: same token bucket as other API v1.3 endpoints (120 tokens max, 2 tokens/second).
+- Billable product: calls beyond the channel's free monthly quota are invoiced.
 
 ---
 
 ## 3. detectCourier
 
-**Purpose:** Infer which courier matches a tracking number from its format alone (pattern, length, prefix). Useful for display or triage when only a tracking code is available and no order context exists.
+### Purpose
 
-**Method + path:** `GET /1.3/detectCourier/`
+Infer the courier from a tracking number alone using regex/length/prefix pattern matching. Returns all plausible matches — the result is **not authoritative** and should be treated as a hint, not a guarantee.
 
-> **Note:** There is also a `detectOrderCourier` endpoint (documented in `orders.md`) that applies your account's rules-based routing logic to pick the best courier for a *new* shipment. These are distinct operations — `detectCourier` identifies an *existing* tracking number; `detectOrderCourier` selects a courier for a *future* shipment.
-
-### Required fields (query parameters)
-
-| Field | Type | Notes |
-|---|---|---|
-| `apiKey` | string | Channel API key. |
-| `trackingNumber` | string | The tracking code to identify. |
-
-### Compact request example
+### Method & Path
 
 ```
-GET /1.3/detectCourier/?apiKey=YOUR_API_KEY&trackingNumber=1Z999AA10123456784
+GET https://api.qapla.it/1.3/detectCourier/?trackingNumber=<tn>
 ```
 
-### Compact response example
+Alias: `?t=<tn>`.
+
+### Authentication
+
+API Key via `X-API-KEY` header or `?apiKey=<key>` query string.
+
+### Parameters
+
+| Param | Type | Required | Notes |
+|-------|------|:--------:|-------|
+| `trackingNumber` | string | Yes | The tracking number to identify. Normalised to uppercase internally; pass a clean value (no leading/trailing spaces). |
+
+### Compact Request Example
+
+```
+GET https://api.qapla.it/1.3/detectCourier/?trackingNumber=1Z9999999999999999
+X-API-KEY: <your-api-key>
+```
+
+### Response Envelope
+
+Returns all candidate couriers. May return zero, one, or multiple matches.
 
 ```json
 {
-  "response": {
-    "detectCourier": {
-      "courierCode": "UPS",
-      "courierName": "UPS"
-    }
+  "detectCourier": {
+    "result": "OK",
+    "couriers": [
+      {
+        "code": "UPS",
+        "name": "UPS",
+        "country": "US",
+        "trackingUrl": "https://www.ups.com/track?tracknum=1Z9999999999999999",
+        "hasWebService": true,
+        "hasPickUpPoint": false,
+        "hasGetPudos": false,
+        "icon": "https://cdn.qapla.it/couriers/ups.svg"
+      }
+    ]
   }
 }
 ```
 
+### Known Pattern Table
+
+| Courier | Pattern |
+|---------|---------|
+| SDA | Alphanumeric, at least one digit, length 9–13 |
+| BRT | 12 digits or 19 digits |
+| GLS-ITA | `^[A-Z][A-Z0-9][0-9]{9}$` (e.g. `E2540359550`) |
+| GLS | `^[0-9]{11}$` |
+| PTI | `^[0-9]{12}$` (overlaps with BRT — both returned) |
+| PTI-PACCOCELERE | `^[A-Z]{2}[0-9]{9}[A-Z]{2}$` (UPU format) |
+| TNT-ITA | `^[A-Z]{2}[0-9]{8}$` or `^[A-Z]{2}[0-9]{9}$` |
+| UPS | Prefix `1Z` |
+| DHL | `^[0-9]{10}$` |
+| FEDEX | Digits only, length ≥ 12 |
+| NEXIVE | Prefix `STCPA` or `^[A-Z]{5}[0-9]{15}$` |
+| CAQ-ITA | `^[0-9]{6}$` |
+
 ### Gotchas
 
-- **FRAGILE and ambiguous by design.** Tracking number formats are not globally unique. Multiple couriers can share patterns of the same length and character set. A confident-looking single match may still be wrong.
-- **Prefer explicit courier context when available.** If you created the shipment via Qapla' or know the carrier from the order, pass `courierCode` explicitly in downstream calls rather than relying on detection.
-- **No match ≠ unsupported courier.** A non-match may mean the pattern database doesn't cover that courier's format in your region, not that Qapla' cannot track that carrier.
-- **Contrast with `detectOrderCourier`** (in `orders.md`): that endpoint applies your configured routing rules (weight/COD/geography) to choose a courier for a new shipment — it is rules-based, not pattern-matching.
-- **Version note:** The API portal previously served this endpoint at `/1.2/detectCourier/`; the canonical current version is `/1.3/detectCourier/`. Use 1.3 for all new integrations.
-
----
-
-## Common notes for all three endpoints
-
-- **Authentication:** All requests require `apiKey` in the request body (POST) or as a query parameter (GET). See `authentication.md` for channel vs. platform key distinctions.
-- **Rate limiting:** Token-bucket, capacity 120, refill 2 tokens/second. HTTP 429 is returned when exceeded. Repeated violations risk API key suspension.
-- **Sandbox mode:** Add `"sandbox": true` to the request body (POST endpoints) to test without operational effects. Sandbox responses are simulated and do not consume credits.
-- **Country codes:** Always ISO 3166-1 alpha-2. Passing full country names or 3-letter codes will cause validation errors.
-- **Currency codes:** Always ISO 4217 (`EUR`, `GBP`, `USD`). Default is `EUR`; non-EUR values are rejected by some couriers silently.
+- **Not authoritative**: patterns are empirically derived. Non-standard tracking numbers or courier format changes can produce false positives/negatives.
+- Multiple matches are intentional: BRT and PTI both match `^[0-9]{12}$`. The response returns both — your application must resolve the ambiguity.
+- Many couriers integrated with Qapla' (Amazon, Poste Italiane, most international carriers) have **no pattern** in `detectCourier`. Always allow the merchant to specify the courier explicitly in `pushShipment` via the `courier` field.
+- The variant `POST /1.3/detectOrderCourier/` applies channel-specific routing rules to return a single courier for an existing order — it is order-aware and not a general-purpose lookup.

@@ -4,338 +4,702 @@ synced: 2026-06-15
 api_versions: [1.2, 1.3]
 ---
 
-# Qapla' Labels API Reference
+# Qapla' Label API — Integration Reference
 
-This document covers label generation, confirmation, multi-parcel shipments, COD (contrassegno), returns, and customs for international shipments.
+API host: `api.qapla.it` (docs site: `https://api.qapla.dev`)
 
-> **Activation note:** The `createLabel` endpoint requires explicit activation. Contact Qapla' Customer Care before integrating.
+Covered: createLabel, confirmLabel, multi-collo, COD, returns, customs, insurance, PUDO fields.
 
 ---
 
-## 1. createLabel — Generate a Shipping Label
+## Authentication
 
-**Purpose:** Synchronously generates a shipping label (PDF, JPG, or ZPL) and assigns a tracking number. The label is created and transmitted to the carrier; the shipment appears in tracking shortly after transmission (not instantly).
+Pass the channel API key in **one** of three ways:
 
-**Method + path:** `POST https://api.qapla.it/1.3/createLabel/`
+| Method | Format |
+|--------|--------|
+| HTTP header | `X-API-Key: <key>` |
+| Query string | `?apiKey=<key>` |
+| JSON body top-level | `"apiKey": "<key>"` |
 
-### Required Fields
+The key identifies the channel; all created/updated resources are automatically scoped to it.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `apiKey` | string | Channel API key |
-| `reference` | string | Order alphanumeric identifier |
-| `courier` | string | Qapla' courier code (e.g. `BRT`, `DHL`, `GLS-ITA`) |
-| `courierService` | string | Service/contract code; defaults to `"0"` if omitted |
-| `name` | string | Recipient full name |
-| `address` | string | Recipient street address |
-| `city` | string | Recipient city |
-| `state` | string | Recipient province/state |
-| `postCode` | string | Recipient postal code |
-| `country` | string | ISO 3166-1 alpha-2 (e.g. `IT`) |
+**Rate limit**: 120 tokens per channel, refilled at 2 tokens/second. Excess returns HTTP 429.
 
-### Key Optional Fields
+---
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `origin` | string | Platform source (`shopify`, `woocommerce`, `magento2`, etc.) |
-| `orderID` | string | Numeric order reference |
-| `email` | string | Recipient email (used for notifications) |
-| `telephone` | string | Recipient phone |
-| `amount` | float | Shipment value (dot separator, max 2 decimals) |
-| `currencyCode` | string | ISO 4217; default `EUR` |
-| `isCOD` | boolean | `true` for cash-on-delivery — see [Contrassegno](#4-contrassegno-cod) |
-| `payment` | string | Set to `CONTRASSEGNO` only when `isCOD` is `true` |
-| `shippingCODPaymentOption` | string | COD payment method variant (carrier-specific) |
-| `weight` | float | Shipment weight in kg |
-| `parcels` | int | Number of packages (colli) — see [Multi-collo](#3-multi-collo-multiple-parcels) |
-| `length` / `width` / `height` | float | Parcel dimensions in cm |
-| `notes` | string | Order notes |
-| `content` | string | Goods description (printed on label, carrier-dependent) |
-| `shippingInsurance` | float \| string | Insurance amount or code — see [Insurance codes](#insurance-codes) |
-| `shippingDeliveryOptions` | string \| JSON | Comma-separated delivery preferences (e.g. `"A,P"`) |
-| `shippingRequiredDeliveryDate` | string | Requested delivery date, `YYYY-MM-DD` |
-| `pickupDate` | string | Collection/pickup date, `YYYY-MM-DD` |
-| `sandbox` | boolean | `true` for test mode (no operational effect) |
-| `custom1` / `custom2` / `custom3` | string | Custom pass-through fields |
+## createLabel
 
-### Object Fields
+Generates a carrier label synchronously. The response always contains the label; there is no polling step.
 
-**`sender`** (optional object) — override the default sender: `code`, `businessName`, `street`, `city`, `state`, `postCode`, `country`, `email`, `telephone`, `referent`, `isDefault`.
+### Endpoints
 
-**`rows`** (optional array) — product line items:
+```
+POST https://api.qapla.it/1.3/createLabel/
+POST https://api.qapla.it/1.4/createLabel/
+```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `sku` | string | yes | Article code |
-| `name` | string | yes | Product description |
-| `qty` | int | yes | Quantity |
-| `price` | float | yes | Unit price |
-| `total` | float | no | Line total |
-| `weight` | float | no | Item weight |
-| `isReturnable` | boolean | no | Return eligibility (defaults `true`) |
-| `customsCode` | string | no | HS / Taric code — required for customs |
-| `originCountry` | string | no | ISO 3166-1 alpha-2, product origin |
+v1.4 is a superset of v1.3: the only addition is `parcelsTracking` in the response. Request parameters are identical across both versions. **Use v1.4** if you handle multi-collo and need per-parcel tracking numbers.
 
-**`PUDO`** (optional object) — pickup/drop-off point; structure varies by carrier (see [PUDO fields](#pudo-carrier-specific-fields)).
-
-**`invoice`** (optional object) — mandatory for DHL international: `{ "number": "FT-2026-001" }`.
-
-**`tradeDocuments`** (optional array) — customs documents (max 5 MB each, base64): `{ "type": "COMMERCIAL_INVOICE", "name": "invoice.pdf", "content": "<base64>" }`. Types include `CERTIFICATE_OF_ORIGIN`, `COMMERCIAL_INVOICE`, `OTHER` (carrier-dependent).
-
-### JSON Request Example
+### Request structure
 
 ```json
 {
-  "apiKey": "YOUR_API_KEY",
+  "apiKey": "<channel-api-key>",
+  "sandbox": true,
   "createLabel": {
-    "origin": "shopify",
-    "reference": "ORD-2026-1234",
-    "courier": "BRT",
-    "courierService": "P46",
+    "reference": "ORD-2024-001",
+    "courier": "GLS-ITA",
+    "courierService": "0",
     "name": "Mario Rossi",
-    "address": "Via Garibaldi 10",
-    "city": "Bologna",
-    "state": "BO",
-    "postCode": "40121",
+    "address": "Via Roma 1",
+    "city": "Milano",
+    "state": "MI",
+    "postCode": "20100",
     "country": "IT",
-    "email": "mario.rossi@example.com",
-    "telephone": "3471234567",
-    "amount": 89.99,
-    "currencyCode": "EUR",
-    "weight": 2.5,
-    "parcels": 1,
-    "length": 30,
-    "width": 20,
-    "height": 15
+    "weight": 2.5
   }
 }
 ```
 
-### Response Example
+### Top-level fields (siblings of `createLabel`, not inside it)
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `apiKey` | string | yes | Channel API key |
+| `sandbox` | boolean | no | Activates carrier sandbox mode. Must already be configured on the channel. Set automatically when `courier: "GENERIC"`. **This is a top-level field, not inside `createLabel`.** |
+| `includeExtShipmentID` | boolean | no | If `true`, adds `extShipmentID` to the response (e.g. DHL Express booking code). Default: `false`. |
+
+### Fields inside `createLabel`
+
+#### Routing
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `reference` | string | **yes** | Alphanumeric order reference. Acts as idempotency key: if an order with the same reference already exists on the channel, it is updated (or the existing label is returned if already generated with `isShipped: true`). |
+| `orderID` | string | no | Additional numeric reference (e.g. CMS internal ID). |
+| `courier` | string | **yes** | Qapla' courier code (e.g. `GLS-ITA`, `BRT`, `CRONO-PTI`, `DHL`). Special values: `GENERIC` (dummy label for testing, no real carrier needed), `AUTO` / `DETECT` (automatic selection via channel rules). Also accepts variant codes (e.g. `BRT-V1`) if configured on the channel. |
+| `courierService` | string | **yes** | Carrier service code (e.g. GLS contract code, BRT service type). **Required field — pass `"0"` as default if not applicable.** If absent, Qapla' defaults to `'0'`. |
+| `costCenterCode` | string | no | Cost centre code. Active for PTI only; falls back to channel default if missing or invalid. |
+| `origin` | string | no | Order origin (e.g. `magento`, `woocommerce`, `amazon`, `api`). Defaults to `createLabel`. |
+
+#### Recipient
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `name` | string | **yes** | Recipient name |
+| `address` | string | **yes** | Recipient address |
+| `city` | string | **yes** | City |
+| `state` | string | **yes** | Province/state |
+| `postCode` | string | **yes** | Postal code |
+| `country` | string | **yes** | ISO 3166-1 alpha-2 country code (e.g. `IT`) |
+| `email` | string | no | Recipient email |
+| `telephone` | string | no | Recipient phone |
+| `recipientTin` | string | no | Tax Identification Number |
+| `recipientTinType` | string | no | TIN type. FedEx values: `PERSONAL_NATIONAL`, `PERSONAL_STATE`, `FEDERAL`, `BUSINESS_NATIONAL`, `BUSINESS_STATE`, `BUSINESS_UNION`. |
+
+#### Amounts
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `amount` | float | no | Order amount (e.g. `109.25`). Decimal separator: dot; no thousands separator; max 2 decimal places. |
+| `shippingCost` | float | no | Shipping cost. Same format rules as `amount`. |
+| `currencyCode` | string | no | ISO 4217 currency code. Default: `EUR`. |
+| `isCOD` | boolean | no | `true` for cash-on-delivery. |
+| `payment` | string | no | Payment method. Can be `CONTRASSEGNO` only when `isCOD` is also `true`. |
+
+#### Dimensions and parcels
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `parcels` | int \| array | no | Number of parcels (integer) **or** array of parcel objects for multi-collo with per-parcel dimensions (see [Multi-collo](#multi-collo) section). If array, the channel must have multi-collo enabled. Default: `1`. |
+| `weight` | float | no | Total weight in kg. Ignored if `parcels` is an array. |
+| `length` | float | no | Length in cm. Ignored if `parcels` is an array. |
+| `width` | float | no | Depth in cm. Ignored if `parcels` is an array. |
+| `height` | float | no | Height in cm. Ignored if `parcels` is an array. |
+
+#### Shipping services
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `shippingInsurance` | float \| string | no | Insurance amount or code. See [Insurance codes](#insurance-codes) section. |
+| `shippingDeliveryOptions` | string \| JSON | no | Additional delivery options, comma-separated (e.g. `"A,P"`, `"22,07"`). PTI: structured JSON. GLS-ITA: pass `"ALLIN"` here to activate comprehensive insurance. BRT Fresh: pass `FRESH_YYYY-MM-DD` (expiry date of refrigerated product; date portion is optional). |
+| `shippingCODPaymentOption` | string | no | COD payment mode override (confirm with support). |
+| `shippingRequiredDeliveryDate` | string (YYYY-MM-DD) | no | Required delivery date. **Mandatory for PAACK.** |
+| `shippingRequiredDeliveryTimeSlot` | string (HS-HE) | no | Delivery time window (e.g. `"8-21"`). **Mandatory for PAACK**; HS and HE must be between 0 and 23. |
+| `latestShipDate` | string (YYYY-MM-DD) | no | Latest ship date. |
+| `latestDeliveryDate` | string (YYYY-MM-DD) | no | Latest delivery date. |
+| `pickupDate` | string (YYYY-MM-DD) | no | Requested pickup date. For SDA: if not specified, the next working day is assigned automatically at transmission. |
+| `numberOfPallets` | int | no | Number of pallets (carrier-dependent). |
+
+#### Direct printing
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `printNodePrinterID` | int \| string | no | PrintNode printer ID or name. If set, label is sent directly to the printer. |
+| `gSpedPrinterID` | int | no | Gsped Labeling Machine printer ID. |
+| `forceReprint` | int | no | `1` to force re-print via PrintNode of an already-generated label (requires `printNodePrinterID`). |
+| `forceLabelsOutput` | int | no | `1` to include label base64 in response even when PrintNode/GLM is used. Default: `0`. |
+
+#### Other fields
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `notes` | string | no | Order notes |
+| `content` | string | no | Goods description (may appear on label, carrier-dependent) |
+| `custom1`–`custom3` | string | no | Custom fields 1–3 |
+| `tag` | string | no | Coloured tag visible in CP. Values: `green`, `yellow`, `orange`, `blue`, `cyan`, `red`. |
+| `goodsCode` | string | no | Goods code. FERCAM: `BANC` (pallet pricing). |
+| `forceRowsUpdate` | int | no | `1` to overwrite all order line items. No effect if labels already generated. |
+
+#### Alternative sender (`sender`)
+
+If the sender differs from the contract holder. Pass the code string if already configured:
+
+```json
+"sender": "my-sender-code"
+```
+
+Or pass the full object:
+
+| Field | Type | Required |
+|-------|------|:--------:|
+| `code` | string | **yes** |
+| `businessName`, `street`, `city`, `state`, `postCode`, `country` | string | no |
+| `email`, `telephone`, `referent` | string | no |
+| `isDefault` | bool | no |
+
+#### Invoice (`invoice`)
+
+Required for DHL international shipments. Useful for any cross-border customs clearance.
+
+```json
+"invoice": {
+  "number": "A00012345/2024",
+  "date": "2024-03-15"
+}
+```
+
+| Field | Type | Required |
+|-------|------|:--------:|
+| `number` | string | **yes** (for DHL) |
+| `date` | string (YYYY-MM-DD) | no |
+
+#### Trade documents (`tradeDocuments`)
+
+Array of electronic documents to transmit to the carrier (DHL, FedEx, UPS). Max file size: 5 MB each. Each element:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Document type (see table below) |
+| `name` | string | File name |
+| `content` | string | File content in **base64** |
+
+Supported document types by carrier:
+
+| Type | FedEx | DHL | UPS |
+|------|:-----:|:---:|:---:|
+| `AUTHORIZATION_FORM` | | yes | yes |
+| `CERTIFICATE_OF_ORIGIN` | yes | yes | yes |
+| `COMMERCIAL_INVOICE` | yes | yes | yes |
+| `DECLARATION` | | yes | yes |
+| `EXPORT_ACCOMPANYING_DOCUMENT` | | yes | yes |
+| `EXPORT_LICENSE` | | yes | yes |
+| `IMPORT_PERMIT` | | yes | yes |
+| `NAFTA_CERTIFICATE_OF_ORIGIN` | yes | yes | |
+| `ONE_TIME_NAFTA` | | yes | yes |
+| `OTHER` | yes | yes | yes |
+| `OTHER_DOCUMENT` | | yes | yes |
+| `PACKING_LIST` | | yes | yes |
+| `POWER_OF_ATTORNEY` | | yes | yes |
+| `PRO_FORMA_INVOICE` | yes | yes | |
+| `SED_DOCUMENT` | | yes | yes |
+| `SHIPPER_LETTER_OF_INSTRUCTION` | | yes | yes |
+
+#### FedEx customs fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `shippingCharge` | string | Who pays shipping: `SENDER`, `RECIPIENT`, `THIRD_PARTY`. If not `SENDER`, also specify `shippingChargeAccount`. |
+| `shippingChargeAccount` | string | Account for shipping charge billing. |
+| `pickupType` | string | FedEx pickup type: `USE_SCHEDULED_PICKUP`, `CONTACT_FEDEX_TO_SCHEDULE`, `DROPOFF_AT_FEDEX_LOCATION`. |
+| `signatureRequired` | string | FedEx signature: `ADULT`, `DIRECT`, `INDIRECT`, `NO_SIGNATURE_REQUIRED`, `SERVICE_DEFAULT`. |
+| `customCharges` | string | Who pays customs: `SENDER`, `RECIPIENT`, `THIRD_PARTY`. |
+| `customChargesAccount` | string | Account for customs charge billing. |
+| `customsChargesBroker` | string | Broker code for customs clearance (contact support to configure). |
+| `customsRecipientIDType` | string | Recipient ID document type: `COMPANY`, `INDIVIDUAL`, `PASSPORT`. |
+| `customsRecipientID` | string | Recipient ID document number (requires `customsRecipientIDType`). |
+| `totalCustomsValue` | float | Total declared customs value. |
+| `dangerousGoods` | JSON array | Dangerous goods (FedEx only). Each item: `parcel` (parcel number string), `type` (`battery`, `dangerous_goods`, `dry_ice`, `alcohol`), plus type-specific attributes. Batteries: `batteryPackingType` (`CONTAINED_IN_EQUIPMENT` \| `PACKED_WITH_EQUIPMENT`), `batteryMaterialType` (`LITHIUM_METAL` \| `LITHIUM_ION`). |
+
+#### Order line items (`rows`)
+
+Optional array. `sku` is the discriminant; rows without `sku` are ignored.
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `sku` | string | **yes** | Item SKU |
+| `name` | string | **yes** | Item description |
+| `qty` | int | **yes** | Quantity |
+| `price` | float | **yes** | Unit price |
+| `total` | float | no | Line total (calculated as `price × qty` if absent) |
+| `weight` | float | no | Item weight |
+| `url`, `imageUrl` | string | no | Product URL / image URL |
+| `notes` | string | no | Item notes |
+| `isReturnable` | bool | no | Eligible for return. Default: `true`. |
+| `customsCode` | string | no | Customs/HS/TARIC code |
+| `originCountry` | string | no | Country of origin (ISO 3166-1 alpha-2) |
+| `netWeight` | float | no | Net weight |
+| `unitOfMeasurement` | string | no | Unit of measurement |
+| `parcelID` | int | no | Parcel number this item ships in (multi-collo). If used, must be set on all rows; distinct `parcelID` count must match parcel count. |
+| `transparencyCodes` | string[] | no | Amazon Transparency Codes |
+| `custom1`–`custom5` | string | no | Custom fields 1–5 |
+
+### Response (200 OK)
 
 ```json
 {
   "createLabel": {
-    "version": "1.3.x",
+    "version": "1.3.32",
     "result": "OK",
     "error": null,
     "isShipped": false,
-    "id": 100042,
-    "courier": "BRT",
-    "trackingNumber": "12345678901",
+    "id": 45231,
+    "courier": "CRONO-PTI",
+    "courierService": "P46",
+    "trackingNumber": "F000538025683",
     "returnTrackingNumber": null,
     "format": "PDF",
-    "labels": ["<base64-encoded-PDF>"]
+    "labels": ["JVBERi0xLjQK..."]
   }
 }
 ```
 
-| Response field | Type | Description |
-|----------------|------|-------------|
-| `id` | int | Shipment ID — required for `confirmLabel` and `deleteLabel` |
-| `trackingNumber` | string | Carrier-assigned tracking number |
-| `returnTrackingNumber` | string | Return label tracking number, if applicable |
-| `format` | string | `PDF`, `JPG`, or `ZPL` |
-| `labels` | array | Base64-encoded label(s) |
-| `isShipped` | boolean | `true` if a label already existed for this order |
+| Field | Type | Description |
+|-------|------|-------------|
+| `result` | string | `OK` on success, `KO` on error |
+| `error` | string \| null | Error description (only present when `result: KO`) |
+| `isShipped` | boolean | `true` if order was already labelled; existing label returned without regeneration |
+| `id` | int | Shipment ID in the label table. Use with `getLabel`, `updateShipment`, `confirmLabel`. |
+| `courier` | string | Courier code used (useful with `AUTO`/`DETECT`) |
+| `courierService` | string \| null | Carrier service code actually applied |
+| `trackingNumber` | string | Shipment tracking number |
+| `returnTrackingNumber` | string \| null | Return tracking number if one was generated alongside the outbound label. Otherwise `null`. This is a standard createLabel response field — it can be null for most shipments. |
+| `format` | string | Label format: `PDF` (base64), `JPG` (base64), `ZPL` |
+| `labels` | array \| string | Array of base64-encoded label(s); multiple elements for multi-collo, or when a return label is included. ZPL is returned as a string. If direct printing (PrintNode/GLM) was used without `forceLabelsOutput: 1`, contains `"Label sent to PrintNode"` or `"Label sent to Gsped Labeling Machine"`. |
+| `extShipmentID` | string | Carrier-assigned alternate ID. Present only if `includeExtShipmentID: true` in request. |
+| `parcelsTracking` | array \| null | **(v1.4 only)** Array of `{"trackingNumber": "..."}` objects, one per parcel. `null` if the carrier does not assign per-parcel tracking numbers. |
 
-> **v1.4 note:** A `parcelsTracking` array in the response exposes per-parcel tracking numbers for multi-collo shipments. Not present in v1.3.
+### Error response
+
+```json
+{
+  "createLabel": {
+    "result": "KO",
+    "error": "Mandatory field `name` is empty"
+  }
+}
+```
+
+Common errors:
+
+| Error | Cause |
+|-------|-------|
+| `Mandatory field 'X' is empty` | Missing required field |
+| `Invalid courier XXX` | Courier code not recognised or label-generation not supported |
+| `Courier setup not purchased` | Carrier product not active for this channel |
+| `Country must be in ISO 3166-1 alpha-2 format` | Invalid `country` code |
+| `Currency code must be in ISO 4217 format` | Invalid `currencyCode` |
+| `parcels: Cannot send json object if multiparcels isn't active` | Array `parcels` sent but multi-collo not enabled on the channel |
+| `weight, width, length, height: mandatory fields when boxCode is not sent` | Parcel object missing required dimensions |
+| `Could not found matching rules for order` | `AUTO`/`DETECT` courier with no matching rules |
 
 ### Gotchas
 
-- After a label is created and transmitted, the shipment appears in tracking **shortly after** — not immediately.
-- `courierService` defaults to `"0"` if empty; always pass the correct service code to avoid wrong contract selection.
-- For integration testing, use courier code `GENERIC` with `sandbox: true`.
-- `payment: "CONTRASSEGNO"` must only be set when `isCOD` is also `true`.
-- Label format (PDF/JPG/ZPL) is controlled by your channel configuration, not by a request parameter.
-- The `id` returned is the Qapla' shipment ID, not the carrier AWB — store it for `confirmLabel` / `deleteLabel`.
+- **Idempotency**: sending a second call with the same `reference` returns the existing label with `isShipped: true`. Use distinct references.
+- **`GENERIC` courier**: always activates sandbox automatically. Generates a dummy label with no real carrier configuration required — ideal for integration testing.
+- **`AUTO`/`DETECT`**: uses channel shipping rules. Returns `KO` if no rule matches.
+- **PrintNode**: label is sent to the printer in background after the response is returned. Use `forceLabelsOutput: 1` to also get the base64 in the response.
+- **Tracking activation**: after label creation the shipment is NOT yet in tracking. It only enters tracking after transmission (`confirmLabel`) the tracking number appears in the tracking system shortly after transmission is confirmed.
 
 ---
 
-## 2. confirmLabel — Transmit Labels to Carrier
+## confirmLabel
 
-**Purpose:** Confirms and transmits to the carrier one or more labels previously created with `createLabel`. Returns a loading list (borderò / manifest) in PDF. A label must be confirmed before the carrier will accept the shipment.
+Transmits already-generated labels to the carrier, marking them as shipped. This is the step that activates tracking (pillar 1) and transactional events (pillar 2).
 
-**Method + path:** `POST https://api.qapla.it/1.2/confirmLabel/` (also callable at `1.3`).
+### Endpoint
 
-### Required Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `apiKey` | string | Channel API key |
-| `courier` | string | Qapla' courier code |
-
-### Selection Modes (one required)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `labelCreationDate` | string | Confirm all labels created on this date (`YYYY-MM-DD`) |
-| `labelID` | array of int | Confirm specific labels by their `id` from `createLabel` |
-
-> Use either `labelCreationDate` **or** `labelID`, not both.
-
-### JSON Request Examples
-
-```json
-{ "apiKey": "YOUR_API_KEY", "confirmLabel": { "courier": "DHL", "labelCreationDate": "2026-06-15" } }
 ```
-```json
-{ "apiKey": "YOUR_API_KEY", "confirmLabel": { "courier": "BRT", "labelID": [100042, 100043, 100044] } }
+POST https://api.qapla.it/1.2/confirmLabel/
+POST https://api.qapla.it/1.3/confirmLabel/
 ```
 
-### Response Example
+### Request
+
+Confirmation is **per (channel, courier)**; you cannot confirm labels from different carriers in one call.
+
+```json
+{
+  "apiKey": "<channel-api-key>",
+  "confirmLabel": {
+    "courier": "GLS-ITA",
+    "shipmentIDs": [12345, 12346, 12347]
+  }
+}
+```
+
+Two mutually exclusive selection modes:
+
+| Mode | Field | Selects |
+|------|-------|---------|
+| By ID list | `shipmentIDs` | Array of shipment `id` values (the `id` returned by `createLabel`) |
+| By creation date | `labelCreationDate` | All unshipped labels for that courier on that date (`YYYY-MM-DD`). Caution: confirms everything not yet transmitted for that day. |
+
+### Response
 
 ```json
 {
   "confirmLabel": {
-    "version": "1.2.9", "result": "OK", "error": null,
-    "courier": "BRT", "number": "00017-2026", "date": "2026-06-15 14:30:00",
-    "shipments": 3, "manifest": "<base64-encoded-PDF>"
+    "result": "OK",
+    "error": null,
+    "transmitted": 3,
+    "errors": []
   }
 }
 ```
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `result` | string | `OK` if at least one label was transmitted; `KO` if all failed |
+| `error` | string \| null | Error description if `result: KO` |
+| `transmitted` | int | Number of labels successfully transmitted |
+| `errors` | array | Transmission errors for individual labels (carrier API rejections) |
+
+**Note**: the `shipmentIDs` field is the correct selector for per-ID confirmation. There is no `labelID` field. The response does not contain a `manifest` or `number` field.
+
+### What happens after confirmLabel
+
+After transmission the shipment moves into the tracking system automatically and the tracking number becomes visible shortly after. This activation is asynchronous — do not poll confirmLabel repeatedly.
+
 ### Gotchas
 
-- `confirmLabel` is the **transmission step** — without it the carrier is unaware of the shipment.
-- Confirm by `labelCreationDate` for end-of-day batch closes; by `labelID` array for real-time/partial closes.
-- An already-confirmed label cannot be confirmed again; use `deleteLabel` first if corrections are needed.
+- For carriers that do not support a sandbox (e.g. GLS-ITA), every transmission creates a real carrier entry. Confirm only labels you intend to ship.
+- Some carriers (e.g. BRT) return a `parcelID` at label-creation time that is NOT the final tracking number. The real tracking number is resolved asynchronously after transmission.
+- Slow carrier APIs can delay the `confirmLabel` response — implement a reasonable HTTP timeout (30–60 s) on your client.
 
 ---
 
-## 3. Multi-collo (Multiple Parcels)
+## Multi-collo
 
-**Purpose:** Declare a shipment composed of multiple physical packages (colli) under a single order reference.
+A multi-parcel shipment is an order split across multiple physical boxes, each potentially with its own tracking number.
 
-In `createLabel`, pass `parcels` as an **integer** count of packages. Top-level `weight` and dimensions apply to each package when all are identical.
+### Enabling multi-collo
+
+The channel must have multi-collo enabled. Sending an array `parcels` without this enabled returns an error.
+
+### `parcels` field — two forms
+
+**Form 1 — integer count** (uniform parcels):
 
 ```json
-{
-  "apiKey": "YOUR_API_KEY",
-  "createLabel": {
-    "reference": "ORD-2026-5678", "courier": "GLS-ITA", "courierService": "0",
-    "name": "Giulia Bianchi", "address": "Via Nazionale 5", "city": "Roma",
-    "state": "RM", "postCode": "00100", "country": "IT",
-    "weight": 8.0, "parcels": 3, "length": 40, "width": 30, "height": 25
-  }
-}
+"parcels": 3,
+"weight": 4.5
 ```
 
-When packages differ, use the `rows` array with a `parcelID` field to assign products to specific parcels.
+Three parcels of equal weight (4.5 kg total divided evenly). No per-parcel dimension detail.
 
-### Carrier Notes
+**Form 2 — array of parcel objects** (per-parcel dimensions):
 
-Some carriers (**FedEx**, **UPS**, **TNT**, **GLS-ITA**) generate one label per physical parcel. For these, `createLabel` returns multiple entries in the `labels` array — one per collo — each possibly with a distinct tracking number. Store all returned `labels` and print them in order. Carriers that consolidate multi-collo under a single master label return a single `labels` entry.
+```json
+"parcels": [
+  {"weight": 1.3, "length": 30, "width": 20, "height": 15},
+  {"weight": 0.8, "length": 20, "width": 15, "height": 10}
+],
+```
 
-### Gotchas
+When using the array form, the top-level `weight`, `length`, `width`, `height` fields are ignored. The total weight is calculated as the sum of parcel weights.
 
-- Validate that your printer workflow handles an **array** of labels; assuming a single label breaks multi-collo.
-- For dangerous goods (batteries), each parcel must be declared individually using its parcel index.
-
----
-
-## 4. Contrassegno (COD — Cash on Delivery)
-
-**Purpose:** Flag a shipment for payment collection at delivery. The COD amount and payment method are transmitted to the carrier on confirmation.
+### Per-parcel object fields
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `isCOD` | boolean | yes | `true` to enable cash-on-delivery |
-| `amount` | float | yes (if COD) | Amount to collect (dot separator, max 2 decimals) |
-| `payment` | string | yes (if COD) | Set to `"CONTRASSEGNO"` |
-| `shippingCODPaymentOption` | string | no | COD payment variant (carrier-specific) |
+|-------|------|:--------:|-------------|
+| `weight` | float | **yes** (unless `boxCode` set) | Parcel weight in kg |
+| `length` | float | **yes** (unless `boxCode` set) | Length in cm |
+| `width` | float | **yes** (unless `boxCode` set) | Depth in cm |
+| `height` | float | **yes** (unless `boxCode` set) | Height in cm |
+| `boxCode` | string | no | Box code from channel box registry. If set, dimensions are read from the registry; `weight` is still required. |
+| `originCountry` | string | no | Country of origin of this parcel's contents (ISO 3166-1 alpha-2) |
+| `content` | string | no | Content description for this parcel |
+
+### Per-parcel tracking (v1.4)
+
+With v1.4, the response includes `parcelsTracking`:
 
 ```json
-{
-  "apiKey": "YOUR_API_KEY",
-  "createLabel": {
-    "reference": "ORD-COD-999", "courier": "BRT", "courierService": "P46",
-    "name": "Luca Ferrari", "address": "Via Manzoni 3", "city": "Torino",
-    "state": "TO", "postCode": "10121", "country": "IT",
-    "isCOD": true, "payment": "CONTRASSEGNO", "amount": 149.90, "currencyCode": "EUR"
-  }
-}
+"parcelsTracking": [
+  {"trackingNumber": "12345678"},
+  {"trackingNumber": "12345679"}
+]
 ```
 
-**Reconciliation:** COD is collected by the carrier at delivery and reconciled afterwards, reported back through Qapla'. Consult Customer Care for the settlement timeline of your carrier contract.
+`null` if the carrier does not assign distinct tracking numbers per parcel.
+
+### Assigning line items to parcels
+
+Use `parcelID` in the `rows` array to indicate which parcel each item ships in. If used, `parcelID` must be set on **all** row items; the number of distinct `parcelID` values must equal the number of parcels.
 
 ### Gotchas
 
-- `payment: "CONTRASSEGNO"` without `isCOD: true` causes a validation error.
-- `shippingCODPaymentOption` values are carrier-specific and must be agreed with Qapla' support.
-- Not all carriers support all COD payment variants.
+- GLS-ITA: maximum 99 parcels per shipment.
+- When parcels is an integer and the carrier requires per-parcel weights, the total weight is divided evenly; the remainder is added to the last parcel.
+- BRT Fresh service (`FRESH_YYYY-MM-DD`) forces ZPL label format.
 
 ---
 
-## 5. Returns (Resi)
+## COD (Cash on Delivery / Contrassegno)
 
-**Purpose:** Generate a return (reverse logistics) label so the end customer can send goods back to the sender. Returns use a dedicated return channel configured in the Control Panel.
+### Activating COD
 
-A return label is obtained via `createLabel` using a **return-enabled courier service** on the return channel. The response includes a `returnTrackingNumber` when the carrier assigns a separate number for the return leg.
+Set both fields in the `createLabel` body:
 
 ```json
-{
-  "apiKey": "YOUR_RETURN_CHANNEL_API_KEY",
-  "createLabel": {
-    "reference": "RET-ORD-2026-1234", "courier": "BRT", "courierService": "P46",
-    "name": "Mario Rossi", "address": "Via Garibaldi 10", "city": "Bologna",
-    "state": "BO", "postCode": "40121", "country": "IT", "weight": 2.5, "parcels": 1
-  }
+"isCOD": true,
+"payment": "CONTRASSEGNO",
+"amount": 109.25
+```
+
+The `amount` field is the COD amount to collect. The carrier API receives this value and prints it on the label.
+
+### COD payment mode
+
+`shippingCODPaymentOption` overrides the default COD collection mode configured on the channel. Contact support for available values per carrier.
+
+### Carrier notes
+
+| Carrier | Notes |
+|---------|-------|
+| SDA | Payment type via `codTipoPagamento`; value `CONT` is normalised to `CON` internally. Default: `VAR`. |
+| TWS | Maximum COD amount: 999.00 EUR. |
+| BRT DPD Direct Infeed | COD not available; returns an error. |
+| GLS-ITA | COD amount can be modified or cancelled after transmission via the release (svincolo) function in CP. |
+
+### Reconciliation
+
+After delivery is confirmed by tracking, COD shipments appear in the CP Contrassegni section. Reconciliation (marking as collected) is manual — either individually in the Control Panel or by uploading a carrier-provided CSV.
+
+---
+
+## Returns
+
+### How returns work
+
+Qapla' does not have a separate `createReturnLabel` API endpoint (it is disabled in v1.3). Returns are created via the standard `createLabel` flow:
+
+1. Use a return-capable courier (e.g. CRONO_REVERSE, a DHL Returns service) as the `courier` value.
+2. Configure the recipient as the merchant (the goods travel back to the sender).
+3. The `returnTrackingNumber` field in a standard createLabel response is a companion return tracking number generated alongside the outbound label — it is `null` when no return label was requested or when the carrier does not support it.
+
+### Return label in the tracking system
+
+A return shipment appears in tracking just like an outbound shipment. There is no special `isReturnShipment` field in the getShipment response; return shipments are identified by the courier's `isReturn` flag in the courier registry and the channel configuration.
+
+### Failed delivery vs. return shipment
+
+These are two distinct concepts:
+
+- **Failed delivery (rientro)**: an outbound shipment that the carrier could not deliver and sent back. Tracked on the original shipment record; status becomes RETURNED (95) when detected.
+- **Return shipment**: a new outbound-in-reverse shipment created explicitly by the merchant or customer. It has its own tracking number and is a separate entity.
+
+### Return flow via tracking page
+
+If the merchant has a return channel configured, customers can initiate a return from the Qapla' tracking page (whitelabel). Qapla' then generates the return label automatically on the configured return carrier.
+
+---
+
+## Insurance
+
+### Insurance by carrier
+
+| Carrier | How to activate | Codes / values |
+|---------|-----------------|----------------|
+| **SDA** | Set `shippingInsurance` to a string code | `AS01`, `AS02`, `AS03`, `AS04`, `AS05`, `AS12`, `AS13`. Also `ASPERC` (percentage, only for services S09 and S24). |
+| **CRONO-PTI** | Same as SDA | All SDA codes above plus `AS14`. |
+| **GLS-ITA** | Set `shippingDeliveryOptions: "ALLIN"` | `ALLIN` (no hyphen) activates comprehensive insurance (`AssicurazioneIntegrativa`). Do not use `shippingInsurance` for GLS-ITA. |
+| **BRT Fresh** | Set `shippingDeliveryOptions` to `FRESH_YYYY-MM-DD` | This activates the B20 Fresh service (refrigerated); it is not an insurance product. BRT does not use SDA-style insurance codes or the `ALLIN` flag. |
+| **SDA S34 (Road Europe)** | `shippingInsurance: "AS12"` | AS12 is specific to the S34 service. |
+
+**Do not** pass `ALLIN` to BRT. **Do not** attribute GLS-ITA insurance to BRT. These are distinct fields and carriers.
+
+---
+
+## PUDO (Pick-Up / Drop-Off Points)
+
+### Finding PUDO points
+
+Use the `getPudos` endpoint to search for nearby collection points:
+
+```
+POST https://api.qapla.it/1.2/getPudos/
+```
+
+The response includes a `pushOrderPUDO` node ready to pass directly to `createLabel`.
+
+### Setting a PUDO in createLabel
+
+Add a `PUDO` object inside `createLabel`:
+
+```json
+"PUDO": {
+  "id": "1234",
+  "type": "ConsegnaLocker",
+  "name": "Locker Stazione Centrale",
+  "address": "Piazza Duca d'Aosta 1",
+  "city": "Milano",
+  "state": "MI",
+  "country": "IT",
+  "postalCode": "20124"
 }
 ```
 
-> The `sender` object in the return call should contain the **merchant's warehouse address** (return destination), and `name`/`address` the **customer's address** (pickup origin).
+The fields `name`, `address`, `city`, `state`, `country`, `postalCode` are used to populate transactional emails to the recipient with the collection point address. Omit them only if email display is not needed.
 
-Per-item return eligibility is controlled by `isReturnable` (boolean) on each `rows` entry when pushing orders/shipments.
-
-### Key Response Fields for Returns
-
-| Field | Description |
-|-------|-------------|
-| `returnTrackingNumber` | Tracking number for the return leg (may match outbound or be distinct) |
-| `isReturnShipment` | `true` in `getShipment` responses when a shipment is a return |
-
-### Webhooks for Returns
-
-Return-related events are delivered via the **Shipments Return Webhook** (a separate webhook type from the standard tracking webhook). See [webhooks.md](webhooks.md) for the payload schema and response contract. Configure the return webhook endpoint separately in the Control Panel.
-
-### Gotchas
-
-- Return labels require a **dedicated return channel** — the standard outbound channel API key will not produce return labels.
-- Not all carriers support automatic return label generation; confirm with Customer Care.
-- If `returnTrackingNumber` is `null`, the carrier uses the same tracking number for both legs (carrier-dependent).
-
----
-
-## Supplementary Topics
-
-### Insurance Codes
-
-Pass `shippingInsurance` as a float (declared value) or as a string code for carriers with fixed tiers. String codes apply to **SDA** and **CRONO-PTI** (e.g. `AS01`..`AS05`, `AS12`..`AS14`). For **BRT**, include `"ALL-IN"` in `shippingDeliveryOptions`. For other carriers, pass a numeric float value. Confirm exact code coverage in the live docs / Control Panel.
-
-### PUDO (Carrier-specific Fields)
+### Required PUDO fields by carrier
 
 | Carrier | Required fields |
 |---------|----------------|
-| DHL / BRT / INPOST / FedEx | `id` |
-| TNT-ITA | `id`, `type` (3=point, 5=locker) |
+| DHL, BRT, INPOST, FedEx, MRW, SENDING, MONDIALRELAY | `id` |
+| TNT-ITA | `id`, `type` (`3` = TNT point, `5` = Locker) |
 | GLS-ITA | `id` (SHOP_ID), `type` (PARTNER_SHOP_ID) |
-| PTI (Poste Italiane) | `id`, `type` (`ConsegnaPuntoPoste` \| `ConsegnaUfficioPostale` \| `ConsegnaLocker` \| `ConsegnaPUDOUPS`), `name` |
+| LICCARDI | `id` (collection point code), `type` (network code, default: `GEL`) |
+| PTI (Poste Italiane) | `id`, `type` (`ConsegnaPuntoPoste` \| `ConsegnaUfficioPostale` \| `ConsegnaLocker` \| `ConsegnaPUDOUPS`), `name`, `address`, `postalCode`, `city`, `province`, `country` |
 | UPS | `id`, `address`, `city`, `country`, `name`, `postalCode`, `state` |
 | SDA | `id`, `address`, `city`, `name`, `postalCode`, `state` |
-| DHL-PAKET | `id`, `type` (`locker` \| `postoffice`), `city`, `name`, `country`, `postalCode`; `postnumber` for postoffice |
+| DHL-PAKET | `id`, `type` (`locker` \| `postoffice`), `city`, `name`, `country`, `postalCode`. Also `postnumber` (required when `type = postoffice`). |
 | DHLPARCEL-ES | `id`, `address`, `city`, `country`, `postalCode`, `harmonisedId`, `keyword`, `psfKey` |
+| GLS-SPAIN | `id`, `name`, `address`, `city`, `country`, `postalCode` |
+| CORREOS-EXPRESS | `id`, `address`, `city`, `country`, `postalCode` |
+| SEUR | `id` |
+| TIPSA | `id`, `address`, `city`, `name`, `postalCode` |
 
-Retrieve available PUDO points via `getPudos` before label creation (see [couriers.md](couriers.md)).
+### PUDO storage
 
-### Customs (International Shipments)
+PUDO data is stored as JSON alongside the shipment and propagated through the label and tracking flows. It is not stored in a separate PUDO registry table.
 
-For non-EU or customs-requiring shipments include:
+---
 
-- **Per `rows` item:** `customsCode` (HS / Taric), `originCountry`, `netWeight`, `unitOfMeasurement`
-- **`invoice` object:** invoice `number` (mandatory for DHL international)
-- **`tradeDocuments` array:** base64 customs documents (max 5 MB each)
-- **Recipient identification:** `recipientTin` + `recipientTinType` (`PERSONAL_NATIONAL`, `BUSINESS_NATIONAL`, etc.)
-- **FedEx-specific:** `totalCustomsValue`, `customCharges` (duty payer `SENDER` / `RECIPIENT` / `THIRD_PARTY`), `customChargesAccount`, etc.
+## Customs (International Shipments)
 
-Carriers enforce different customs requirements; check carrier-specific notes or contact Customer Care before shipping internationally for the first time.
+### Line item customs fields (in `rows`)
+
+For international shipments requiring customs declarations, populate these fields on each row item:
+
+| Field | Description |
+|-------|-------------|
+| `customsCode` | HS/TARIC customs tariff code |
+| `originCountry` | Country of manufacture (ISO 3166-1 alpha-2) |
+| `netWeight` | Net weight of the item |
+| `unitOfMeasurement` | Unit of measurement |
+
+### Invoice
+
+For DHL international shipments, the `invoice` object is required:
+
+```json
+"invoice": {
+  "number": "INV-2024-001",
+  "date": "2024-03-15"
+}
+```
+
+### Trade documents
+
+Attach scanned/electronic commercial documents via `tradeDocuments`. See the full type list in the createLabel section above. Support varies: DHL supports the widest range (~16 types), FedEx and UPS support a subset.
+
+### FedEx-specific customs
+
+FedEx international shipments support additional customs control via the FedEx customs fields listed in the createLabel section: `shippingCharge`, `customCharges`, `customsRecipientIDType`, `totalCustomsValue`, `dangerousGoods`, etc.
+
+### SDA P48 (Crono Internazionale)
+
+Uses dedicated customs handling. Requires items with `customsCode` and `originCountry` per parcel. The channel must have a default customs code and manufacture countries configured as fallback defaults in the Control Panel.
+
+---
+
+## Complete Request Example
+
+```json
+{
+  "apiKey": "my-channel-api-key",
+  "sandbox": true,
+  "createLabel": {
+    "reference": "BAT-234241299",
+    "courier": "CRONO-PTI",
+    "courierService": "P46",
+    "name": "Barbara Gordon",
+    "address": "Via Manin 8",
+    "city": "Vigonza",
+    "state": "PD",
+    "postCode": "35010",
+    "country": "IT",
+    "email": "batgirl@yahoo.it",
+    "telephone": "3473425220",
+    "isCOD": false,
+    "amount": 109.25,
+    "shippingCost": 9.35,
+    "currencyCode": "EUR",
+    "parcels": [
+      {"weight": 1.3, "length": 10, "width": 15, "height": 5},
+      {"weight": 0.8, "length": 8, "width": 12, "height": 4}
+    ],
+    "shippingInsurance": "AS01",
+    "PUDO": {
+      "id": "1234",
+      "type": "ConsegnaLocker",
+      "name": "Locker Stazione Centrale",
+      "address": "Piazza Duca d'Aosta 1",
+      "city": "Milano",
+      "state": "MI",
+      "country": "IT",
+      "postalCode": "20124"
+    },
+    "invoice": {
+      "number": "A00012345/2024",
+      "date": "2024-03-15"
+    },
+    "rows": [
+      {
+        "sku": "PROD-001",
+        "name": "Gadget Tecnologico",
+        "qty": 1,
+        "price": 109.25,
+        "parcelID": 1
+      }
+    ]
+  }
+}
+```
+
+### v1.4 multi-collo response
+
+```json
+{
+  "createLabel": {
+    "version": "1.4.0",
+    "result": "OK",
+    "error": null,
+    "isShipped": false,
+    "id": 45231,
+    "courier": "GLS-ITA",
+    "courierService": "0",
+    "trackingNumber": "MI12345678",
+    "returnTrackingNumber": null,
+    "format": "PDF",
+    "labels": ["JVBERi0xLjQK...", "JVBERi0xLjQL..."],
+    "parcelsTracking": [
+      {"trackingNumber": "MI12345678"},
+      {"trackingNumber": "MI12345679"}
+    ]
+  }
+}
+```
